@@ -1,23 +1,15 @@
-package com.hmelizarraraz.saludmock;
+package com.hmelizarraraz.saludmock.ui;
 
-import android.animation.Animator;
-import android.animation.AnimatorListenerAdapter;
-import android.annotation.TargetApi;
 import android.content.Context;
 import android.content.Intent;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.support.design.widget.TextInputLayout;
 import android.support.v7.app.AppCompatActivity;
-import android.app.LoaderManager.LoaderCallbacks;
 
-import android.content.Loader;
-import android.database.Cursor;
-import android.os.AsyncTask;
-
-import android.os.Build;
 import android.os.Bundle;
 import android.text.TextUtils;
+import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.View.OnClickListener;
@@ -28,10 +20,25 @@ import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.hmelizarraraz.saludmock.R;
+import com.hmelizarraraz.saludmock.data.api.SaludMockApi;
+import com.hmelizarraraz.saludmock.data.api.model.Affiliate;
+import com.hmelizarraraz.saludmock.data.api.model.ApiError;
+import com.hmelizarraraz.saludmock.data.api.model.LoginBody;
+import com.hmelizarraraz.saludmock.data.prefs.SessionsPrefs;
+
+import retrofit2.Call;
+import retrofit2.Callback;
+import retrofit2.Response;
+import retrofit2.Retrofit;
+import retrofit2.converter.gson.GsonConverterFactory;
+
 /**
  * A login screen that offers login via email/password.
  */
 public class LoginActivity extends AppCompatActivity {
+    private Retrofit mRestAdapter;
+    private SaludMockApi mSaludMockApi;
 
     /**
      * Credenciales de pruebas
@@ -39,11 +46,6 @@ public class LoginActivity extends AppCompatActivity {
      */
     private static final String DUMMY_USER_ID = "0000000000";
     private static final String DUMMY_PASSWORD = "secret";
-
-    /**
-     * Keep track of the login task to ensure we can cancel it if requested.
-     */
-    private UserLoginTask mAuthTask = null;
 
     // UI references.
     private ImageView mLogoView;
@@ -58,6 +60,15 @@ public class LoginActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_login);
+
+        // Crear conexión al servicio REST
+        mRestAdapter = new Retrofit.Builder()
+                .baseUrl(SaludMockApi.BASE_URL)
+                .addConverterFactory(GsonConverterFactory.create())
+                .build();
+
+        // Crear conexión a la API de SaludMock
+        mSaludMockApi = mRestAdapter.create(SaludMockApi.class);
 
         mLogoView = (ImageView) findViewById(R.id.image_logo);
         mUserIdView = (EditText) findViewById(R.id.user_id);
@@ -103,9 +114,6 @@ public class LoginActivity extends AppCompatActivity {
      * errors are presented and no actual login attempt is made.
      */
     private void attemptLogin() {
-        if (mAuthTask != null) {
-            return;
-        }
 
         // Reset errors.
         mFloatLabelUserId.setError(null);
@@ -145,11 +153,48 @@ public class LoginActivity extends AppCompatActivity {
             // form field with an error.
             focusView.requestFocus();
         } else {
-            // Show a progress spinner, and kick off a background task to
-            // perform the user login attempt.
+            // Mostrar el indicador de carga y luego iniciar la petición asincrona
             showProgress(true);
-            mAuthTask = new UserLoginTask(userId, password);
-            mAuthTask.execute((Void) null);
+
+            Call<Affiliate> loginCall = mSaludMockApi.login(new LoginBody(userId, password));
+            loginCall.enqueue(new Callback<Affiliate>() {
+                @Override
+                public void onResponse(Call<Affiliate> call, Response<Affiliate> response) {
+                    // Mostrar progreso
+                    showProgress(false);
+
+                    // Procesar errores
+                    if (!response.isSuccessful()) {
+                        String error;
+                        if (response.errorBody()
+                                .contentType()
+                                .subtype()
+                                .equals("application/json")) {
+                            ApiError apiError = ApiError.fromResponseBody(response.errorBody());
+
+                            error = apiError.getMessage();
+                            Log.d("LoginActivity", apiError.getDeveloperMessage());
+                        } else {
+                            error = response.message();
+                        }
+                        showLoginError(error);
+                        return;
+                    }
+
+                    // Guardar afiliado en preferencias
+                    SessionsPrefs.get(LoginActivity.this).saveAffiliate(response.body());
+
+                    // Ir a las citas médicas
+                    showAppointmentsScreen();
+                }
+
+                @Override
+                public void onFailure(Call<Affiliate> call, Throwable t) {
+                    showProgress(false);
+                    showLoginError(t.getMessage());
+                }
+            });
+
         }
     }
 
@@ -170,74 +215,6 @@ public class LoginActivity extends AppCompatActivity {
         int visibility = show ? View.GONE : View.VISIBLE;
         mLogoView.setVisibility(visibility);
         mLoginFormView.setVisibility(visibility);
-    }
-
-    /**
-     * Represents an asynchronous login/registration task used to authenticate
-     * the user.
-     */
-    public class UserLoginTask extends AsyncTask<Void, Void, Integer> {
-
-        private final String mUserId;
-        private final String mPassword;
-
-        UserLoginTask(String email, String password) {
-            mUserId = email;
-            mPassword = password;
-        }
-
-        @Override
-        protected Integer doInBackground(Void... params) {
-
-            /*
-            1:Petición exitosa
-            2:Número de identificación no registrado
-            3:Password incorrecto
-            4:Error del servidor
-            */
-
-            try {
-                // Simulate network access.
-                Thread.sleep(2000);
-            } catch (InterruptedException e) {
-                return 4;
-            }
-
-            if (!mUserId.equals(DUMMY_USER_ID)) {
-                return 2;
-            }
-
-            if (!mPassword.equals(DUMMY_PASSWORD)) {
-                return 3;
-            }
-
-            return 1;
-        }
-
-        @Override
-        protected void onPostExecute(final Integer success) {
-            mAuthTask = null;
-            showProgress(false);
-
-            switch (success) {
-                case 1:
-                    showAppointmentsScreen();
-                    break;
-                case 2:
-                case 3:
-                    showLoginError("Número de identificación o contraseña inválidos");
-                    break;
-                case 4:
-                    showLoginError(getString(R.string.error_server));
-                    break;
-            }
-        }
-
-        @Override
-        protected void onCancelled() {
-            mAuthTask = null;
-            showProgress(false);
-        }
     }
 
     private void showAppointmentsScreen() {

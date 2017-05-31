@@ -1,4 +1,4 @@
-package com.hmelizarraraz.saludmock;
+package com.hmelizarraraz.saludmock.ui;
 
 import android.content.Intent;
 import android.os.Bundle;
@@ -10,6 +10,9 @@ import android.view.View;
 import android.view.Menu;
 import android.view.MenuItem;
 
+import com.hmelizarraraz.saludmock.R;
+import com.hmelizarraraz.saludmock.data.prefs.SessionsPrefs;
+
 public class AppointmentsActivity extends AppCompatActivity {
 
     @Override
@@ -17,7 +20,7 @@ public class AppointmentsActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
 
         // Redirección al login
-        if (true) {
+        if (!SessionsPrefs.get(this).isLoggedIn()) {
             startActivity(new Intent(this, LoginActivity.class));
             finish();
             return;
